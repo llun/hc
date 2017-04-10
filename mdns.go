@@ -1,10 +1,8 @@
 package hc
 
 import (
-	"github.com/brutella/hc/log"
-	"github.com/oleksandr/bonjour"
+	"github.com/guelfey/go.dbus"
 
-	"fmt"
 	"os"
 	"strings"
 )
@@ -12,7 +10,6 @@ import (
 // MDNSService represents a mDNS service.
 type MDNSService struct {
 	config *Config
-	server *bonjour.Server
 }
 
 // NewMDNSService returns a new service based for the bridge name, id and port.
@@ -22,45 +19,42 @@ func NewMDNSService(config *Config) *MDNSService {
 	}
 }
 
-// IsPublished returns true when the service is published.
-func (s *MDNSService) IsPublished() bool {
-	return s.server != nil
-}
-
 // Publish announces the service for the machine's ip address on a random port using mDNS.
 func (s *MDNSService) Publish() error {
-	// Host should end with '.'
 	hostname, _ := os.Hostname()
-	host := fmt.Sprintf("%s.", strings.Trim(hostname, "."))
-	text := s.config.txtRecords()
-
-	// 2016-03-14(brutella): Replace whitespaces (" ") from service name
-	// with underscores ("_")to fix invalid http host header field value
-	// produces by iOS.
-	//
-	// [Radar] http://openradar.appspot.com/radar?id=4931940373233664
 	stripped := strings.Replace(s.config.name, " ", "_", -1)
+	var dconn *dbus.Conn
+	var obj *dbus.Object
+	var path dbus.ObjectPath
+	var err error
 
-	server, err := bonjour.RegisterProxy(stripped, "_hap._tcp.", "", s.config.servePort, host, s.config.IP, text, nil)
+	dconn, err = dbus.SystemBus()
 	if err != nil {
-		log.Info.Panic(err)
+		return err
 	}
 
-	s.server = server
-	return err
-}
+	obj = dconn.Object("org.freedesktop.Avahi", "/")
+	obj.Call("org.freedesktop.Avahi.Server.EntryGroupNew", 0).Store(&path)
 
-// Update updates the mDNS txt records.
-func (s *MDNSService) Update() {
-	if s.server != nil {
-		txt := s.config.txtRecords()
-		s.server.SetText(txt)
-		log.Debug.Println(txt)
+	obj = dconn.Object("org.freedesktop.Avahi", path)
+
+	records := s.config.txtRecords()
+	var text [][]byte = make([][]byte, len(records))
+	for idx, record := range records {
+		text[idx] = []byte(record)
 	}
-}
 
-// Stop stops the running mDNS service.
-func (s *MDNSService) Stop() {
-	s.server.Shutdown()
-	s.server = nil
+	// http://www.dns-sd.org/ServiceTypes.html
+	obj.Call("org.freedesktop.Avahi.EntryGroup.AddService", 0,
+		int32(-1),                  // avahi.IF_UNSPEC
+		int32(-1),                  // avahi.PROTO_UNSPEC
+		uint32(0),                  // flags
+		stripped,                   // sname
+		"_hap._tcp",                // stype
+		"local",                    // sdomain
+		hostname,                   // shost
+		uint16(s.config.servePort), // port
+		text) // text record
+	obj.Call("org.freedesktop.Avahi.EntryGroup.Commit", 0)
+	return nil
 }

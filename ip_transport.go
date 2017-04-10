@@ -151,10 +151,6 @@ func (t *ipTransport) Stop() {
 		t.keepAlive.Stop()
 	}
 
-	if t.mdns != nil {
-		t.mdns.Stop()
-	}
-
 	if t.server != nil {
 		t.server.Stop()
 	}
@@ -171,13 +167,6 @@ func (t *ipTransport) isPaired() bool {
 	}
 
 	return false
-}
-
-func (t *ipTransport) updateMDNSReachability() {
-	if mdns := t.mdns; mdns != nil {
-		t.config.discoverable = t.isPaired() == false
-		mdns.Update()
-	}
 }
 
 func (t *ipTransport) addAccessory(a *accessory.Accessory) {
@@ -232,10 +221,8 @@ func (t *ipTransport) Handle(ev interface{}) {
 	switch ev.(type) {
 	case event.DevicePaired:
 		log.Debug.Printf("Event: paired with device")
-		t.updateMDNSReachability()
 	case event.DeviceUnpaired:
 		log.Debug.Printf("Event: unpaired with device")
-		t.updateMDNSReachability()
 	default:
 		break
 	}
